@@ -138,6 +138,6 @@ def get_dataloaders(root_path = Path("./Data/keras_slices_data"), num_workers = 
     val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
     test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
 
-    return train_dataloader, val_dataloader, test_dataloader
+    return train_dataloader, val_dataloader, test_dataloader, id_channels, num_classes
 
-get_dataloaders()
+#get_dataloaders()

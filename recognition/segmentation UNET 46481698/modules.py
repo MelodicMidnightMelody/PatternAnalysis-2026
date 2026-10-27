@@ -1,8 +1,5 @@
 import torch
 import torch.nn as nn
-from sympy.codegen.fnodes import dimension
-from sympy.physics.units import dimensions
-
 
 class DoubleConvBlock(nn.Module):
     def __init__(self, in_channels, out_channels):
