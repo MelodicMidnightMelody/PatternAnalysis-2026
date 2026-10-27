@@ -1,5 +1,7 @@
 import torch
 import torch.nn as nn
+from sympy.codegen.fnodes import dimension
+
 
 class DoubleConvBlock(nn.Module):
     def __init__(self, in_channels, out_channels):
@@ -20,13 +22,13 @@ class DoubleConvBlock(nn.Module):
 class DownBlock(nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
-        self.block = nn.Sequential(
+        self.d_block = nn.Sequential(
             nn.MaxPool2d(2),
             DoubleConvBlock(in_channels, out_channels)
         )
 
     def forward(self, x):
-        x = self.block(x)
+        x = self.d_block(x)
         return x
 
 class UpBlock(nn.Module):
@@ -76,5 +78,16 @@ class UNet2D(nn.Module):
         x = self.up3(x, x2)
         x = self.up4(x, x1)
 
-        x = self.outc(x)
-        return x
+        logits = self.outc(x)
+        return logits
+
+def dice_loss(prediction, target, epsilon=1e-8):
+
+    prediction_prob = torch.sigmoid(prediction)
+    dimensions = (0, 2, 3)
+    intersection = torch.sum(prediction_prob * target, dimensions)
+    union = torch.sum(prediction_prob + target, dimensions)
+    dice = (2.0 * intersection + epsilon) / (union + epsilon)
+    dice_mean = dice.mean()
+
+    return 1.0 - dice_mean
