@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from sympy.codegen.fnodes import dimension
+from sympy.physics.units import dimensions
 
 
 class DoubleConvBlock(nn.Module):
@@ -91,3 +92,15 @@ def dice_loss(prediction, target, epsilon=1e-8):
     dice_mean = dice.mean()
 
     return 1.0 - dice_mean
+
+def dice_coefficient(prediction, target, epsilon=1e-8):
+
+    prediction_prob = torch.sigmoid(prediction)
+    binary_prediction = (prediction_prob > 0.5).float()
+
+    dimensions = (0, 2, 3)
+    intersection = torch.sum(binary_prediction * target, dimensions)
+    union = torch.sum(binary_prediction + target, dimensions)
+    dice = (2.0 * intersection + epsilon) / (union + epsilon)
+
+    return dice
