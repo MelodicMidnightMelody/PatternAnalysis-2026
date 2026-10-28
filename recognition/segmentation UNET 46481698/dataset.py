@@ -97,7 +97,7 @@ class LoadDataset(Dataset):
         h, w = loaded_np_mask.shape
 
         #One hot encoding conversion
-        mask_encoded = np.zeros(self.num_classes, h, w, dtype="float32")
+        mask_encoded = np.zeros((self.num_classes, h, w), dtype="float32")
         for label_id, channel in self.id_channels.items():
             mask_encoded[channel] = (loaded_np_mask == label_id).astype("float32")
 
@@ -109,6 +109,8 @@ class LoadDataset(Dataset):
                                            mode="bilinear", align_corners=False).squeeze(0)
 
         loaded_torch_mask = F.interpolate(loaded_torch_mask.unsqueeze(0), size=self.size, mode="nearest").squeeze(0)
+
+        return loaded_torch_image, loaded_torch_mask
 
 
 def get_dataloaders(root_path = Path("./Data/keras_slices_data"), num_workers = 1, batch_size = 32, out_size = (256, 256)):

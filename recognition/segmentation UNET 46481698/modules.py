@@ -50,7 +50,7 @@ class UNet2D(nn.Module):
         super().__init__()
 
         #Encoder
-        self.double = DoubleConvBlock(in_channels, base_channels)
+        self.double_conv = DoubleConvBlock(in_channels, base_channels)
         self.down1 = DownBlock(base_channels, base_channels*2)
         self.down2 = DownBlock(base_channels*2, base_channels*4)
         self.down3 = DownBlock(base_channels*4, base_channels*8)
@@ -65,7 +65,7 @@ class UNet2D(nn.Module):
         self.outc = nn.Conv2d(base_channels, num_classes, kernel_size=1)
 
     def forward(self, x):
-        x1 = self.double(x)
+        x1 = self.double_conv(x)
         x2 = self.down1(x1)
         x3 = self.down2(x2)
         x4 = self.down3(x3)
