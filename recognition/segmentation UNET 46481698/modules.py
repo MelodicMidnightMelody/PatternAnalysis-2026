@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 class DoubleConvBlock(nn.Module):
     def __init__(self, in_channels, out_channels):
@@ -46,7 +47,7 @@ class UpBlock(nn.Module):
         return x
 
 class UNet2D(nn.Module):
-    def __init__(self, in_channels = 1, num_classes = 2, base_channels = 32):
+    def __init__(self, in_channels = 1, num_classes = 6, base_channels = 32):
         super().__init__()
 
         #Encoder
@@ -79,20 +80,35 @@ class UNet2D(nn.Module):
         logits = self.outc(x)
         return logits
 
-def dice_loss(prediction, target, epsilon=1e-8):
 
-    prediction_prob = torch.sigmoid(prediction)
+def dice_loss(prediction, target, epsilon=1e-6):
+
+    prediction_prob = torch.softmax(prediction, dim=1)
     dimensions = (0, 2, 3)
     intersection = torch.sum(prediction_prob * target, dimensions)
-    union = torch.sum(prediction_prob + target, dimensions)
+    union = torch.sum(prediction_prob, dimensions) + torch.sum(target, dimensions)
     dice = (2.0 * intersection + epsilon) / (union + epsilon)
     dice_mean = dice.mean()
 
     return 1.0 - dice_mean
 
-def dice_coefficient(prediction, target, epsilon=1e-8):
+def dice_counts(prediction, target):
+    c = target.shape[1]
+    index = prediction.argmax(dim=1)
+    pred = (index.unsqueeze(1) == torch.arange(c, device=index.device).view(1, -1, 1, 1)).float()
+    dims = (0, 2, 3)
+    inter = (pred * target).sum(dims)
+    union = pred.sum(dims) + target.sum(dims)
+    return inter, union
 
-    prediction_prob = torch.sigmoid(prediction)
+def combined_loss(prediction, target):
+    ce = F.cross_entropy(prediction, target.argmax(dim=1))
+    dice = dice_loss(prediction, target)
+    return ce + dice
+
+def dice_coefficient(prediction, target, epsilon=1e-6):
+
+    prediction_prob = torch.softmax(prediction, dim=1)
     binary_prediction = (prediction_prob > 0.5).float()
 
     dimensions = (0, 2, 3)
