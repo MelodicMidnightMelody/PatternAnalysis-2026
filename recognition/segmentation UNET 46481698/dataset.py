@@ -1,3 +1,5 @@
+import random
+from collections import Counter
 from pathlib import Path
 import nibabel as nib
 import numpy as np
@@ -34,9 +36,50 @@ def _get_pairs(image_dir: Path, mask_dir: Path):
     sorted_samples = sorted(samples, key=lambda s: (s.patient_id, s.week, s.slice))
     return sorted_samples
 
+def check_leakage(train_samples:list[NamedTuple], test_samples:list[NamedTuple], val_samples:list[NamedTuple]):
+    train_ids = {s.patient_id for s in train_samples}
+    val_ids = {s.patient_id for s in val_samples}
+    test_ids = {s.patient_id for s in test_samples}
+
+    overlaps = {
+        "train/val": train_ids & val_ids,
+        "train/test": train_ids & val_ids,
+        "test/val": val_ids & test_ids,
+    }
+    leaked = False
+    for name, ids in overlaps.items():
+        if ids:
+            leaked = True
+            print(f"LEAKAGE {name}: {len(ids)} shared patients, e.g. {sorted(ids)[:10]}")
+
+    if not leaked:
+            print("No patient overlap between train, val and test.")
+    return leaked
+
+def categorise_prostate(sorted_samples:list[NamedTuple]):
+
+    count_labels = {}
+    prostate_labeled = set()
+    prostate_unlabeled = set()
+    for sample in sorted_samples:
+        mask_path = sample.mask_path
+        nifti_mask = nib.load(mask_path).get_fdata(caching='unchanged')
+        count_labels[f"{sample.patient_id}-{sample.week}-{sample.slice}"] = len(np.unique(nifti_mask))
+        if 5 in np.unique(nifti_mask):
+            prostate_labeled.add(sample)
+        else:
+            prostate_unlabeled.add(sample)
+
+    prostate = sorted(list(prostate_labeled), key=lambda s: (s.patient_id, s.week, s.slice))
+    n_prostate = sorted(list(prostate_unlabeled), key=lambda s: (s.patient_id, s.week, s.slice))
+    print(f"There are {len(prostate_labeled)} prostate images")
+
+    return prostate, n_prostate
+
 def get_label_ids(sorted_samples):
 
     all_label_ids = set()
+
 
     for sample in sorted_samples:
         mask_path = sample.mask_path
@@ -44,6 +87,7 @@ def get_label_ids(sorted_samples):
         if nifti_mask.ndim == 3:
             nifti_mask = nifti_mask[:, :, 0]
         #nifti_mask = nifti_mask.astype(np.uint8)
+
         for id in np.unique(nifti_mask):
             all_label_ids.add(int(id))
 
@@ -52,6 +96,8 @@ def get_label_ids(sorted_samples):
     for channel, id in enumerate(label_ids):
         id_to_channels[id] = channel
     num_classes = len(label_ids)
+    print("num classes: ", label_ids)
+
     return id_to_channels, num_classes
 
 class LoadDataset(Dataset):
@@ -60,7 +106,7 @@ class LoadDataset(Dataset):
 
 
     """
-    def __init__(self, samples, num_classes, id_channels, size=(256, 256), normalized=True):
+    def __init__(self, samples, num_classes, id_channels, size=(256, 128), normalized=True):
 
         self.samples = samples
         self.num_classes = num_classes
@@ -94,26 +140,42 @@ class LoadDataset(Dataset):
             std = loaded_np_image.std()
             loaded_np_image = (loaded_np_image - mean) / (std + 1e-8)
 
-        h, w = loaded_np_mask.shape
 
+
+        # resize and fix dimensions
+        loaded_np_image = fit_to_size(loaded_np_image, self.size)
+        loaded_np_mask = fit_to_size(loaded_np_mask, self.size)
+
+        h, w = loaded_np_mask.shape
         #One hot encoding conversion
         mask_encoded = np.zeros((self.num_classes, h, w), dtype="float32")
         for label_id, channel in self.id_channels.items():
             mask_encoded[channel] = (loaded_np_mask == label_id).astype("float32")
 
+
+
         loaded_torch_image = torch.from_numpy(loaded_np_image).unsqueeze(0)
         loaded_torch_mask = torch.from_numpy(mask_encoded)
 
-        #resize and fix dimensions
-        loaded_torch_image = F.interpolate(loaded_torch_image.unsqueeze(0), size=self.size,
-                                           mode="bilinear", align_corners=False).squeeze(0)
 
-        loaded_torch_mask = F.interpolate(loaded_torch_mask.unsqueeze(0), size=self.size, mode="nearest").squeeze(0)
+
+        #loaded_torch_image = F.interpolate(loaded_torch_image.unsqueeze(0), size=self.size,
+                                           #mode="bilinear", align_corners=False).squeeze(0)
+
+        #loaded_torch_mask = F.interpolate(loaded_torch_mask.unsqueeze(0), size=self.size, mode="nearest").squeeze(0)
 
         return loaded_torch_image, loaded_torch_mask
 
+def fit_to_size(nib_arr, size):
+    out_h, out_w = size
+    nib_h, nib_w = nib_arr.shape
 
-def get_dataloaders(root_path = Path("./Data/keras_slices_data"), num_workers = 1, batch_size = 32, out_size = (256, 256)):
+    top, left = max((nib_h - out_h) // 2, 0), max((nib_w - out_w) // 2, 0)
+    nib_arr = nib_arr[top:top + min(nib_h, out_h), left:left + min(nib_w, out_w)]
+
+    return nib_arr
+
+def get_dataloaders(root_path = Path("./Data/keras_slices_data"), num_workers = 2, batch_size = 32, out_size = (256, 128)):
 
     root_path = Path(root_path)
     train_img_path = root_path / "keras_slices_train"
@@ -129,17 +191,40 @@ def get_dataloaders(root_path = Path("./Data/keras_slices_data"), num_workers = 
 
     print(len(train_samples), len(val_samples), len(test_samples))
 
-    id_channels, num_classes = get_label_ids(train_samples)
+    check_leakage(train_samples, val_samples, test_samples)
+
+    prostate_samples, reg_samples = categorise_prostate(train_samples)
+
+    sample_size = max(1, round(len(reg_samples) * 0.12))
+
+    reg_samples_selection = random.sample(reg_samples, sample_size)
+    training_samples = sorted(prostate_samples + reg_samples_selection, key=lambda s: (s.patient_id, s.week, s.slice))
+    print ("Training dataset size: ", len(training_samples))
+
+    id_channels, num_classes = get_label_ids(training_samples)
     print(num_classes)
 
-    train_dataset = LoadDataset(train_samples, num_classes, id_channels, size=(256, 256))
-    val_dataset = LoadDataset(val_samples, num_classes, id_channels, size=(256, 256))
-    test_dataset = LoadDataset(test_samples, num_classes, id_channels, size=(256, 256))
+    #print training data dimensions
+    #shapes = Counter(nib.load(s.image_path).shape for s in train_samples)
+    #print(f"train dimensions: {shapes}")
+    #shapes = Counter(nib.load(s.mask_path).shape for s in train_samples)
+    #print(f"train seg dimensions: {shapes}")
+    #shapes = Counter(nib.load(s.image_path).shape for s in val_samples)
+    #print(f"val dimensions: {shapes}")
+    #shapes = Counter(nib.load(s.image_path).shape for s in test_samples)
+    #print(f"test dimensions: {shapes}")
+
+    train_dataset = LoadDataset(training_samples, num_classes, id_channels, size=(256, 128))
+    val_dataset = LoadDataset(val_samples, num_classes, id_channels, size=(256, 128))
+    test_dataset = LoadDataset(test_samples, num_classes, id_channels, size=(256, 128))
 
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
     val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
     test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
 
+
+
     return train_dataloader, val_dataloader, test_dataloader, id_channels, num_classes
 
 #get_dataloaders()
+
