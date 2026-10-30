@@ -2,6 +2,133 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
+class ImpConvBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1):
+        super().__init__()
+
+        self.block = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size, padding=kernel_size // 2, stride=stride, bias=False),
+            nn.InstanceNorm2d(out_channels, affine=True),
+            nn.LeakyReLU(negative_slope=1e-2, inplace=True),
+        )
+
+    def forward(self, x):
+        x = self.block(x)
+        return x
+
+class ContextModule(nn.Module):
+    def __init__(self, channels, p_drop=0.3):
+        super().__init__()
+        self.block = nn.Sequential(
+            nn.InstanceNorm2d(channels, affine=True),
+            nn.LeakyReLU(negative_slope=1e-2, inplace=True),
+            nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False),
+            nn.Dropout(p=p_drop),
+            nn.InstanceNorm2d(channels, affine=True),
+            nn.LeakyReLU(negative_slope=1e-2, inplace=True),
+            nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False),
+        )
+
+    def forward(self, x):
+        x = self.block(x)
+        return x
+
+class UpscaleBlock(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.block = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode='bilinear'),
+            ImpConvBlock(in_channels, out_channels),
+        )
+
+    def forward(self, x):
+        x = self.block(x)
+        return x
+
+class LocalisationBlock(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.block = nn.Sequential(
+            ImpConvBlock(in_channels, out_channels, kernel_size=3),
+            ImpConvBlock(out_channels, out_channels, kernel_size=1),
+        )
+
+    def forward(self, x):
+        x = self.block(x)
+        return x
+
+class ImpDownBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, stride=2, p_drop=0.3):
+        super().__init__()
+        self.imp_conv = ImpConvBlock(in_channels, out_channels, stride=stride)
+        self.context = ContextModule(out_channels, p_drop)
+
+    def forward(self, x):
+        x = self.imp_conv(x)
+        x = x + self.context(x)
+        return x
+
+class ImpUpBlock(nn.Module):
+    def __init__(self, in_channels, skip_channel, out_channels, final=False):
+        super().__init__()
+
+        self.up = UpscaleBlock(in_channels, out_channels)
+        cat_channels = out_channels + skip_channel
+        if final:
+            self.loc = ImpConvBlock(cat_channels, out_channels)
+        else:
+            self.loc = LocalisationBlock(cat_channels, out_channels)
+
+    def forward(self, x, skip):
+        x = self.up(x)
+        x = torch.cat([skip, x], dim=1)
+        x = self.loc(x)
+        return x
+
+
+class ImprovedUNet(nn.Module):
+    def __init__(self, in_channels = 1, num_classes = 6, base_channels = 32, softmax= False):
+        super().__init__()
+        self.softmax = softmax
+        self.enc1 = ImpDownBlock(in_channels, base_channels, stride=1)
+        self.enc2 = ImpDownBlock(base_channels, base_channels*2, stride=2)
+        self.enc3 = ImpDownBlock(base_channels*2, base_channels*4, stride=2)
+        self.enc4 = ImpDownBlock(base_channels*4, base_channels*8, stride=2)
+        self.enc5 = ImpDownBlock(base_channels*8, base_channels*16, stride=2)
+
+        self.dec1 = ImpUpBlock(base_channels*16, base_channels*8, base_channels*8)
+        self.dec2 = ImpUpBlock(base_channels*8, base_channels*4, base_channels*4)
+        self.dec3 = ImpUpBlock(base_channels*4, base_channels*2, base_channels*2)
+        self.dec4 = ImpUpBlock(base_channels*2, base_channels, base_channels, final=True)
+
+        self.seg3 = nn.Conv2d(base_channels*4, num_classes, 1)
+        self.seg2 = nn.Conv2d(base_channels*2, num_classes, 1)
+        self.seg1 = nn.Conv2d(base_channels, num_classes, 1)
+        self.upscale = nn.Upsample(scale_factor=2, mode='bilinear')
+
+    def forward(self, x):
+
+        x1 = self.enc1(x)
+        x2 = self.enc2(x1)
+        x3 = self.enc3(x2)
+        x4 = self.enc4(x3)
+        x5 = self.enc5(x4)
+
+        d1 = self.dec1(x5, x4)
+        d2 = self.dec2(d1, x3)
+        d3 = self.dec3(d2, x2)
+        d4 = self.dec4(d3, x1)
+
+        out = self.seg3(d2)
+        out = self.upscale(out) + self.seg2(d3)
+        out = self.upscale(out) + self.seg1(d4)
+
+        if self.softmax:
+            out = F.softmax(out, dim=1)
+
+        return out
+
 class DoubleConvBlock(nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
@@ -105,15 +232,3 @@ def combined_loss(prediction, target):
     ce = F.cross_entropy(prediction, target.argmax(dim=1))
     dice = dice_loss(prediction, target)
     return ce + dice
-
-def dice_coefficient(prediction, target, epsilon=1e-6):
-
-    prediction_prob = torch.softmax(prediction, dim=1)
-    binary_prediction = (prediction_prob > 0.5).float()
-
-    dimensions = (0, 2, 3)
-    intersection = torch.sum(binary_prediction * target, dimensions)
-    union = torch.sum(binary_prediction + target, dimensions)
-    dice = (2.0 * intersection + epsilon) / (union + epsilon)
-
-    return dice

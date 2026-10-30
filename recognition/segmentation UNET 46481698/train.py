@@ -7,7 +7,7 @@ import torch.nn as nn
 from pathlib import Path
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-from modules import UNet2D, dice_counts, combined_loss
+from modules import UNet2D, dice_counts, combined_loss, ImprovedUNet
 from dataset import get_dataloaders
 
 def plot_training_curves(training_losses, val_losses, save_path):
@@ -78,6 +78,8 @@ def main():
     parser = argparse.ArgumentParser(description='Train U-Net for HipMRI segmentation')
     parser.add_argument('--data_path', type=str, required=True,
                         help='Path to dataset')
+    parser.add_argument('--unet', type=bool, default=False,
+                        help='False for Improved UNet, True for Improved UNet')
     parser.add_argument('--epochs', type=int, default=20,
                         help='Number of epochs')
     parser.add_argument('--batch_size', type=int, default=8,
@@ -99,7 +101,12 @@ def main():
 
     #Setting model
 
-    model = UNet2D(in_channels=1, num_classes=num_classes).to(device)
+    if args.unet:
+        model = ImprovedUNet(in_channels=1, num_classes=num_classes).to(device)
+        print("Training Improved UNet")
+    else:
+        model = UNet2D(in_channels=1, num_classes=num_classes).to(device)
+        print("Training Standard UNet")
 
     num_parameters = 0
     trainable_parameters = 0
@@ -121,15 +128,6 @@ def main():
     save_path = Path(args.save_dir) / 'best_model.pth'
 
     start_time = time.time()
-
-    #img, m = train_dataloader.dataset[0]
-    #print(img.shape, img.mean().item(), img.std().item())
-    #print(m.shape, (m.sum(dim=(1, 2)) / m[0].numel()))  # fraction of pixels per class
-    #import matplotlib.pyplot as plt
-    #fig, ax = plt.subplots(1, 2)
-    #ax[0].imshow(img[0], cmap="gray")
-    #ax[1].imshow(m.argmax(0))
-    #plt.show()
 
     for epoch in range(args.epochs):
 
@@ -183,7 +181,7 @@ def main():
     }
 
 
-    with open(Path(args.save_dir) / 'test_results.json', 'w') as f:
+    with open(Path(args.save_dir) / 'test_results 1.json', 'w') as f:
         json.dump(results, f, indent=2)
 
     print(f"\nResults saved to {args.save_dir}")

@@ -43,8 +43,8 @@ def check_leakage(train_samples:list[NamedTuple], test_samples:list[NamedTuple],
 
     overlaps = {
         "train/val": train_ids & val_ids,
-        "train/test": train_ids & val_ids,
-        "test/val": val_ids & test_ids,
+        "train/test": train_ids & test_ids,
+        "val/test": val_ids & test_ids,
     }
     leaked = False
     for name, ids in overlaps.items():
@@ -53,7 +53,7 @@ def check_leakage(train_samples:list[NamedTuple], test_samples:list[NamedTuple],
             print(f"LEAKAGE {name}: {len(ids)} shared patients, e.g. {sorted(ids)[:10]}")
 
     if not leaked:
-            print("No patient overlap between train, val and test.")
+        print("No patient overlap between train, val and test.")
     return leaked
 
 def categorise_prostate(sorted_samples:list[NamedTuple]):
@@ -175,7 +175,7 @@ def fit_to_size(nib_arr, size):
 
     return nib_arr
 
-def get_dataloaders(root_path = Path("./Data/keras_slices_data"), num_workers = 2, batch_size = 32, out_size = (256, 128)):
+def get_dataloaders(root_path = Path("./Data/keras_slices_data"), num_workers = 1, batch_size = 32, out_size = (256, 128)):
 
     root_path = Path(root_path)
     train_img_path = root_path / "keras_slices_train"
