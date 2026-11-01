@@ -107,8 +107,8 @@ def draw_rows(rows, num_classes, prostate):
         ax.imshow(image, cmap="gray")
         ax.imshow(np.ma.masked_equal(errors, 0), cmap=error_cmap, vmin=0, vmax=3,
                   alpha=0.8, interpolation="bilinear")
-        ax.set_title("Prostate: Mask/Prediction Overlap\n Green = Prostate, Yellow = False Positive, "
-                     "Red = False Negative")
+        ax.set_title("Prostate: Mask/Prediction Overlap\n G = Prostate, Y = FP, "
+                     "Red = FN")
 
         ax = fig.add_subplot(n, 5, 5 * r + 5)
         text = title + "\n\nDice per class\n"

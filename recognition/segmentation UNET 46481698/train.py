@@ -128,7 +128,7 @@ def main():
     print('Trainable parameters: ', trainable_parameters)
 
     if args.unet:
-        optimiser = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-4)
+        optimiser = torch.optim.AdamW(model.parameters(), lr=1e-4)
     else:
         optimiser = optim.AdamW(model.parameters(), lr=1e-4)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimiser, patience=2)
