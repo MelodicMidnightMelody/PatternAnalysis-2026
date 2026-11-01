@@ -24,7 +24,7 @@ class ContextModule(nn.Module):
             nn.InstanceNorm2d(channels, affine=True),
             nn.LeakyReLU(negative_slope=1e-2, inplace=True),
             nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False),
-            nn.Dropout(p=p_drop),
+            nn.Dropout2d(p=p_drop),
             nn.InstanceNorm2d(channels, affine=True),
             nn.LeakyReLU(negative_slope=1e-2, inplace=True),
             nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False),
@@ -88,7 +88,7 @@ class ImpUpBlock(nn.Module):
 
 
 class ImprovedUNet(nn.Module):
-    def __init__(self, in_channels = 1, num_classes = 6, base_channels = 32, softmax= False):
+    def __init__(self, in_channels = 1, num_classes = 6, base_channels = 16, softmax= False):
         super().__init__()
         self.softmax = softmax
         self.enc1 = ImpDownBlock(in_channels, base_channels, stride=1)
@@ -208,7 +208,7 @@ class UNet2D(nn.Module):
         return logits
 
 
-def dice_loss(prediction, target, epsilon=1e-6):
+def dice_loss(prediction, target, epsilon=1.0):
 
     prediction_prob = torch.softmax(prediction, dim=1)
     dimensions = (0, 2, 3)
